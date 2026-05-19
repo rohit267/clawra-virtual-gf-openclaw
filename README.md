@@ -32,7 +32,7 @@ Clawra Selfie enables your OpenClaw agent to:
 ## Prerequisites
 
 - [OpenClaw](https://github.com/openclaw/openclaw) installed and configured
-- [fal.ai](https://fal.ai) account (free tier available)
+- [fal.ai](https://fal.ai) account (optional; without `FAL_KEY`, scripts use Google-dorked public/social image results and return a random raw image URL)
 
 ## Manual Installation
 
@@ -40,7 +40,7 @@ If you prefer manual setup:
 
 ### 1. Get API Key
 
-Visit [fal.ai/dashboard/keys](https://fal.ai/dashboard/keys) and create an API key.
+Visit [fal.ai/dashboard/keys](https://fal.ai/dashboard/keys) and create an API key. This is optional; if `FAL_KEY` is not configured, Clawra falls back to a Google-dorked random raw public/social image URL.
 
 ### 2. Clone the Skill
 

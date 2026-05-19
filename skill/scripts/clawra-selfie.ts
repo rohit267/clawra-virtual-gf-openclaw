@@ -8,7 +8,7 @@
  *   npx ts-node grok-imagine-send.ts "<prompt>" "<channel>" ["<caption>"]
  *
  * Environment variables:
- *   FAL_KEY - Your fal.ai API key
+ *   FAL_KEY - Your fal.ai API key (optional; falls back to scraped public images)
  *   OPENCLAW_GATEWAY_URL - OpenClaw gateway URL (default: http://localhost:18789)
  *   OPENCLAW_GATEWAY_TOKEN - Gateway auth token (optional)
  */
@@ -37,6 +37,7 @@ interface GrokImagineImage {
 interface GrokImagineResponse {
   images: GrokImagineImage[];
   revised_prompt?: string;
+  source?: string;
 }
 
 interface OpenClawMessage {
@@ -63,6 +64,9 @@ type AspectRatio =
 
 type OutputFormat = "jpeg" | "png" | "webp";
 
+const SOCIAL_IMAGE_DOMAINS =
+  /(?:pbs\.twimg\.com|twimg\.com|i\.pinimg\.com|pinimg\.com|cdninstagram|fbcdn|redd\.it|redditmedia)/i;
+
 interface GenerateAndSendOptions {
   prompt: string;
   channel: string;
@@ -78,6 +82,7 @@ interface Result {
   channel: string;
   prompt: string;
   revisedPrompt?: string;
+  source?: string;
 }
 
 // Check for fal.ai client
@@ -91,7 +96,171 @@ try {
 }
 
 /**
- * Generate image using Grok Imagine via fal.ai
+ * Build a deterministic random image fallback URL when scraping returns no usable images.
+ */
+function getPicsumFallback(input: GrokImagineInput): GrokImagineResponse {
+  const seed = encodeURIComponent(`${input.prompt}-${Date.now()}`);
+  return {
+    images: [
+      {
+        url: `https://picsum.photos/seed/${seed}/1024/1024`,
+        content_type: "image/jpeg",
+        width: 1024,
+        height: 1024,
+      },
+    ],
+    revised_prompt: `Random fallback image for: ${input.prompt}`,
+    source: "picsum",
+  };
+}
+
+function extractImageUrls(html: string, socialOnly: boolean): string[] {
+  const normalizedHtml = html
+    .replace(/\\\//g, "/")
+    .replace(/\\u003d/g, "=")
+    .replace(/\\u0026/g, "&")
+    .replace(/&amp;/g, "&");
+
+  const imageUrls = Array.from(
+    normalizedHtml.matchAll(
+      /https?:\/\/[^"'<>\\\s]+\.(?:jpg|jpeg|png|webp)(?:\?[^"'<>\\\s]*)?/gi
+    ),
+    (match) => match[0]
+  );
+
+  return [...new Set(imageUrls)].filter((url) => {
+    if (socialOnly && !SOCIAL_IMAGE_DOMAINS.test(url)) {
+      return false;
+    }
+
+    return !/googleusercontent\.com|gstatic\.com|google\.com/i.test(url);
+  });
+}
+
+async function fetchHtml(url: string): Promise<string | null> {
+  try {
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (compatible; clawra-selfie/1.1.1)",
+      },
+    });
+
+    if (!response.ok) {
+      console.warn(
+        `[WARN] Image scraping failed: ${response.status} ${response.statusText}`
+      );
+      return null;
+    }
+
+    return response.text();
+  } catch (error) {
+    console.warn(`[WARN] Image scraping failed: ${(error as Error).message}`);
+    return null;
+  }
+}
+
+/**
+ * Scrape Google image results with social-media dorks and return raw image URLs
+ * where Google exposes them in public HTML.
+ */
+async function getGoogleDorkImage(
+  input: GrokImagineInput
+): Promise<GrokImagineResponse | null> {
+  const dork = `${input.prompt} (site:i.pinimg.com OR site:pbs.twimg.com OR site:twimg.com OR site:pinterest.com OR site:x.com OR site:twitter.com OR site:instagram.com OR site:reddit.com) (jpg OR jpeg OR png OR webp)`;
+  const searchUrl = `https://www.google.com/search?tbm=isch&safe=active&q=${encodeURIComponent(
+    dork
+  )}`;
+  const html = await fetchHtml(searchUrl);
+
+  if (!html) {
+    return null;
+  }
+
+  const imageUrls = extractImageUrls(html, true);
+
+  if (imageUrls.length === 0) {
+    return null;
+  }
+
+  const imageUrl = imageUrls[Math.floor(Math.random() * imageUrls.length)];
+  const extension = imageUrl.split(".").pop()?.split("?")[0].toLowerCase();
+  const contentType =
+    extension === "png"
+      ? "image/png"
+      : extension === "webp"
+      ? "image/webp"
+      : "image/jpeg";
+
+  return {
+    images: [
+      {
+        url: imageUrl,
+        content_type: contentType,
+        width: 0,
+        height: 0,
+      },
+    ],
+    revised_prompt: `Google-dorked social image result for: ${input.prompt}`,
+    source: "google-social-dork",
+  };
+}
+
+/**
+ * Scrape public image search results and return a random image URL.
+ */
+async function getRandomScrapedImage(
+  input: GrokImagineInput
+): Promise<GrokImagineResponse> {
+  const googleDorkResult = await getGoogleDorkImage(input);
+
+  if (googleDorkResult) {
+    return googleDorkResult;
+  }
+
+  const searchUrl = `https://commons.wikimedia.org/wiki/Special:MediaSearch?type=image&search=${encodeURIComponent(
+    input.prompt
+  )}`;
+  const html = await fetchHtml(searchUrl);
+
+  if (!html) {
+    return getPicsumFallback(input);
+  }
+
+  const uniqueImageUrls = extractImageUrls(html, false).filter((url) =>
+    /upload\.wikimedia\.org/i.test(url)
+  );
+
+  if (uniqueImageUrls.length === 0) {
+    return getPicsumFallback(input);
+  }
+
+  const imageUrl =
+    uniqueImageUrls[Math.floor(Math.random() * uniqueImageUrls.length)];
+  const extension = imageUrl.split(".").pop()?.split("?")[0].toLowerCase();
+  const contentType =
+    extension === "png"
+      ? "image/png"
+      : extension === "webp"
+      ? "image/webp"
+      : "image/jpeg";
+
+  return {
+    images: [
+      {
+        url: imageUrl,
+        content_type: contentType,
+        width: 0,
+        height: 0,
+      },
+    ],
+    revised_prompt: `Scraped public image result for: ${input.prompt}`,
+    source: "wikimedia-commons",
+  };
+}
+
+/**
+ * Generate image using Grok Imagine via fal.ai, or scrape a random public image
+ * when no fal.ai key is configured.
  */
 async function generateImage(
   input: GrokImagineInput
@@ -99,9 +268,10 @@ async function generateImage(
   const falKey = process.env.FAL_KEY;
 
   if (!falKey) {
-    throw new Error(
-      "FAL_KEY environment variable not set. Get your key from https://fal.ai/dashboard/keys"
+    console.warn(
+      "[WARN] FAL_KEY environment variable not set. Scraping a random public image instead."
     );
+    return getRandomScrapedImage(input);
   }
 
   // Use fal client if available
@@ -235,6 +405,7 @@ async function generateAndSend(options: GenerateAndSendOptions): Promise<Result>
     channel,
     prompt,
     revisedPrompt: imageResult.revised_prompt,
+    source: imageResult.source,
   };
 }
 
@@ -254,7 +425,7 @@ Arguments:
   output_format - Image format (default: jpeg) Options: jpeg, png, webp
 
 Environment:
-  FAL_KEY       - Your fal.ai API key (required)
+  FAL_KEY       - Your fal.ai API key (optional; falls back to scraped public images)
 
 Example:
   FAL_KEY=your_key npx ts-node grok-imagine-send.ts "A cyberpunk city" "#art" "Check this out!"

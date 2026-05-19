@@ -26,17 +26,19 @@ https://cdn.jsdelivr.net/gh/SumeLabs/clawra@main/assets/clawra.png
 
 ## Quick Reference
 
-### Required Environment Variables
+### Environment Variables
 
 ```bash
-FAL_KEY=your_fal_api_key          # Get from https://fal.ai/dashboard/keys
+FAL_KEY=your_fal_api_key          # Optional; get from https://fal.ai/dashboard/keys
 OPENCLAW_GATEWAY_TOKEN=your_token  # From: openclaw doctor --generate-gateway-token
 ```
+
+If `FAL_KEY` is not set, the runtime scripts use Google-dorked public/social image results and return a random raw image URL instead of calling fal.ai.
 
 ### Workflow
 
 1. **Get user prompt** for how to edit the image
-2. **Edit image** via fal.ai Grok Imagine Edit API with fixed reference
+2. **Edit image** via fal.ai Grok Imagine Edit API with fixed reference, or scrape a random raw public/social image URL when no API key is configured
 3. **Extract image URL** from response
 4. **Send to OpenClaw** with target channel(s)
 
@@ -388,7 +390,7 @@ openclaw gateway start
 
 ## Error Handling
 
-- **FAL_KEY missing**: Ensure the API key is set in environment
+- **FAL_KEY missing**: Runtime scripts fall back to Google-dorked public/social images
 - **Image edit failed**: Check prompt content and API quota
 - **OpenClaw send failed**: Verify gateway is running and channel exists
 - **Rate limits**: fal.ai has rate limits; implement retry logic if needed
