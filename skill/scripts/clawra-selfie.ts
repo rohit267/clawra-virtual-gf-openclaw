@@ -322,7 +322,7 @@ async function sendViaOpenClaw(
 ): Promise<void> {
   if (useCLI) {
     // Use OpenClaw CLI
-    const cmd = `openclaw message send --action send --channel "${message.channel}" --message "${message.message}" --media "${message.media}"`;
+    const cmd = `openclaw message send --action send --target "${message.channel}" --message "${message.message}" --media "${message.media}"`;
     await execAsync(cmd);
     return;
   }

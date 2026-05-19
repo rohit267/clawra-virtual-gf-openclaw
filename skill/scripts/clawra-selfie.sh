@@ -155,7 +155,7 @@ if [ "$USE_CLI" = true ]; then
     # Use OpenClaw CLI
     openclaw message send \
         --action send \
-        --channel "$CHANNEL" \
+        --target "$CHANNEL" \
         --message "$CAPTION" \
         --media "$IMAGE_URL"
 else
